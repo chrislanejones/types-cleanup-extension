@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
 
-interface ParsedInterface {
+interface TypeDefinition {
   name: string;
   content: string;
   properties: Set<string>;
@@ -11,20 +11,23 @@ interface ParsedInterface {
   type?: "interface" | "type";
 }
 
-class TypesCleanupManager {
+class TypesCleanupManager implements vscode.Disposable {
   private statusBarItem: vscode.StatusBarItem;
   private isEnabled: boolean = true;
   private cleanupTimer: NodeJS.Timeout | null = null;
   private workspaceRoot: string;
   private typesFilePath: string;
   private typesMoved: number = 0;
+  private typesRemoved: number = 0;
+  private interfacesExtracted: number = 0;
+  private lastActivity: string = "None";
 
   constructor(context: vscode.ExtensionContext) {
     this.workspaceRoot =
       vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || "";
     this.typesFilePath = path.join(this.workspaceRoot, this.getTypesFileName());
 
-    // Handle workspace changes (useful for Cursor's workspace management)
+    // Handle workspace changes
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
       this.workspaceRoot =
         vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || "";
@@ -57,6 +60,7 @@ class TypesCleanupManager {
     context.subscriptions.push(this.statusBarItem);
   }
 
+  // Configuration methods
   private getTypesFileName(): string {
     const config = vscode.workspace.getConfiguration("typesCleanup");
     return config.get("typesFileName", "Types.d.ts");
@@ -72,11 +76,17 @@ class TypesCleanupManager {
     return config.get("enableAutoCleanup", true);
   }
 
+  private isSourceCleanupEnabled(): boolean {
+    const config = vscode.workspace.getConfiguration("typesCleanup");
+    return config.get("cleanupSourceFiles", true);
+  }
+
+  // Status bar methods
   private updateStatusBar(): void {
     const typesFileName = path.basename(this.getTypesFileName());
 
     if (this.isEnabled && this.typesFileExists()) {
-      this.statusBarItem.text = `$(symbol-interface) Types Cleanup 🧹 (${this.typesMoved})`;
+      this.statusBarItem.text = `$(symbol-interface) Types Cleanup 🧹 (+${this.typesMoved}/-${this.typesRemoved})`;
       this.statusBarItem.tooltip = this.createTooltip(
         "Active",
         `Monitoring ${typesFileName}`
@@ -122,9 +132,12 @@ class TypesCleanupManager {
     tooltip.appendMarkdown(`**Status:** ${status}\n`);
     tooltip.appendMarkdown(`**Description:** ${description}\n`);
     tooltip.appendMarkdown(`**Types File:** \`${relativeTypesPath}\`\n`);
+    tooltip.appendMarkdown(`**Types Added:** ${this.typesMoved}\n`);
+    tooltip.appendMarkdown(`**Types Removed:** ${this.typesRemoved}\n`);
     tooltip.appendMarkdown(
-      `**Lines Moved:** ${this.typesMoved} since last save\n\n`
+      `**Interfaces Extracted:** ${this.interfacesExtracted}\n`
     );
+    tooltip.appendMarkdown(`**Last Activity:** ${this.lastActivity}\n\n`);
     tooltip.appendMarkdown(`---\n\n`);
     tooltip.appendMarkdown(`**Options:**\n`);
     tooltip.appendMarkdown(`• Click to open menu\n`);
@@ -145,6 +158,7 @@ class TypesCleanupManager {
     return exists;
   }
 
+  // Main command methods
   public toggle(): void {
     this.isEnabled = !this.isEnabled;
     this.updateStatusBar();
@@ -156,7 +170,6 @@ class TypesCleanupManager {
   }
 
   public async showMenu(): Promise<void> {
-    const typesFileName = path.basename(this.getTypesFileName());
     const currentStatus = this.isEnabled ? "Enabled" : "Disabled";
 
     const options = [
@@ -172,13 +185,18 @@ class TypesCleanupManager {
       },
       {
         label: `$(info) Stats`,
-        description: `${this.typesMoved} lines moved since last save`,
+        description: `+${this.typesMoved}/-${this.typesRemoved} types, ${this.interfacesExtracted} extracted`,
         action: "stats",
       },
       {
         label: `$(brush) Manual Cleanup Now`,
         description: "Remove unused interfaces",
         action: "cleanup",
+      },
+      {
+        label: `$(refresh) Reset Statistics`,
+        description: "Clear all counters",
+        action: "reset-stats",
       },
     ];
 
@@ -200,6 +218,9 @@ class TypesCleanupManager {
           break;
         case "cleanup":
           await this.manualCleanup();
+          break;
+        case "reset-stats":
+          this.resetStats();
           break;
       }
     }
@@ -232,22 +253,59 @@ class TypesCleanupManager {
       `• **Status:** ${this.isEnabled ? "Enabled" : "Disabled"}`,
       `• **Types File:** ${this.getTypesFileName()}`,
       `• **File Exists:** ${typesExists ? "Yes" : "No"}`,
-      `• **Interfaces:** ${interfaceCount}`,
-      `• **Lines Moved:** ${this.typesMoved} since last save`,
+      `• **Current Interfaces:** ${interfaceCount}`,
+      `• **Types Added:** ${this.typesMoved}`,
+      `• **Types Removed:** ${this.typesRemoved}`,
+      `• **Interfaces Extracted:** ${this.interfacesExtracted}`,
+      `• **Last Activity:** ${this.lastActivity}`,
       `• **Auto Cleanup:** ${
         this.isAutoCleanupEnabled() ? "Enabled" : "Disabled"
       }`,
+      `• **Source Cleanup:** ${
+        this.isSourceCleanupEnabled() ? "Enabled" : "Disabled"
+      }`,
       `• **Cleanup Delay:** ${this.getCleanupDelay()}ms`,
     ].join("\n");
-
-    const markdown = new vscode.MarkdownString(stats);
-    markdown.isTrusted = true;
 
     vscode.window.showInformationMessage(
       stats.replace(/\*\*/g, "").replace(/•/g, "-")
     );
   }
 
+  public testExtraction(): void {
+    const activeEditor = vscode.window.activeTextEditor;
+    if (!activeEditor) {
+      vscode.window.showErrorMessage("No active editor");
+      return;
+    }
+
+    const content = activeEditor.document.getText();
+    const interfaces = this.extractInterfaces(content);
+
+    const results = interfaces
+      .map(
+        (i) =>
+          `${i.type || "interface"}: ${i.name} (lines ${i.startLine}-${
+            i.endLine
+          })`
+      )
+      .join(", ");
+    const message = `Found ${interfaces.length} definitions: ${results}`;
+
+    console.log("Test extraction results:", interfaces);
+    vscode.window.showInformationMessage(message);
+  }
+
+  public resetStats(): void {
+    this.typesMoved = 0;
+    this.typesRemoved = 0;
+    this.interfacesExtracted = 0;
+    this.lastActivity = "Stats reset";
+    this.updateStatusBar();
+    vscode.window.showInformationMessage("Statistics reset");
+  }
+
+  // File processing methods
   public async onFileSave(document: vscode.TextDocument): Promise<void> {
     console.log("Types Cleanup: File saved:", document.fileName);
 
@@ -274,8 +332,19 @@ class TypesCleanupManager {
     }
 
     // Don't process the Types.d.ts file itself
-    if (document.fileName.endsWith(this.getTypesFileName())) {
-      console.log("Types Cleanup: Skipping types file itself");
+    const typesFileName = path.basename(this.getTypesFileName());
+    const documentFileName = path.basename(document.fileName);
+
+    if (
+      documentFileName === typesFileName ||
+      document.fileName.includes(this.getTypesFileName()) ||
+      document.fileName.endsWith("types.d.ts") ||
+      document.fileName.endsWith("Types.d.ts")
+    ) {
+      console.log(
+        "Types Cleanup: Skipping types file itself:",
+        documentFileName
+      );
       return;
     }
 
@@ -285,29 +354,43 @@ class TypesCleanupManager {
 
       const interfaces = this.extractInterfaces(content);
       console.log(
-        "Types Cleanup: Found interfaces:",
-        interfaces.map((i) => i.name)
+        "Types Cleanup: Found definitions:",
+        interfaces.map((i) => `${i.type || "interface"}: ${i.name}`)
       );
 
       if (interfaces.length > 0) {
-        const beforeCount = this.typesFileExists()
-          ? this.extractInterfaces(fs.readFileSync(this.typesFilePath, "utf8"))
-              .length
-          : 0;
+        // Read existing types file content
+        const existingContent = fs.readFileSync(this.typesFilePath, "utf8");
+        console.log(
+          "Types Cleanup: Existing types file length:",
+          existingContent.length
+        );
 
+        const beforeCount = this.extractInterfaces(existingContent).length;
+        console.log("Types Cleanup: Existing definitions count:", beforeCount);
+
+        // Add to types file
         await this.addInterfacesToTypesFile(interfaces);
         console.log("Types Cleanup: Added interfaces to types file");
 
-        const afterCount = this.typesFileExists()
-          ? this.extractInterfaces(fs.readFileSync(this.typesFilePath, "utf8"))
-              .length
-          : 0;
+        // Clean up source file and add imports (if enabled)
+        if (this.isSourceCleanupEnabled()) {
+          await this.cleanupSourceFile(document, interfaces);
+        }
+
+        const afterContent = fs.readFileSync(this.typesFilePath, "utf8");
+        const afterCount = this.extractInterfaces(afterContent).length;
+        console.log("Types Cleanup: New definitions count:", afterCount);
 
         this.typesMoved += afterCount - beforeCount;
+        this.interfacesExtracted += interfaces.length;
+        this.lastActivity = `Extracted ${
+          interfaces.length
+        } interface(s) from ${path.basename(document.fileName)}`;
         this.updateStatusBar();
 
         vscode.window.showInformationMessage(
-          `Added ${interfaces.length} interface(s) to ${path.basename(
+          `Moved ${interfaces.length} definition(s) to ${path.basename(
             this.getTypesFileName()
           )}`
         );
@@ -325,8 +408,9 @@ class TypesCleanupManager {
     }
   }
 
-  private extractInterfaces(content: string): ParsedInterface[] {
-    const interfaces: ParsedInterface[] = [];
+  // Interface extraction methods
+  private extractInterfaces(content: string): TypeDefinition[] {
+    const interfaces: TypeDefinition[] = [];
     const lines = content.split("\n");
 
     for (let i = 0; i < lines.length; i++) {
@@ -334,51 +418,118 @@ class TypesCleanupManager {
 
       // Match interface declarations
       const interfaceMatch = line.match(
-        /^export\s+interface\s+(\w+)|^interface\s+(\w+)/
+        /^export\s+interface\s+(\w+)|^interface\s+(\w+)|^\s*interface\s+(\w+)/
       );
+
+      // Match type declarations
+      const typeMatch = line.match(
+        /^export\s+type\s+(\w+)|^type\s+(\w+)|^\s*type\s+(\w+)/
+      );
+
       if (interfaceMatch) {
-        const interfaceName = interfaceMatch[1] || interfaceMatch[2];
-        const startLine = i;
-        let endLine = i;
-        let braceCount = 0;
-        let interfaceContent = "";
-        let started = false;
-
-        // Find the complete interface
-        for (let j = i; j < lines.length; j++) {
-          const currentLine = lines[j];
-          interfaceContent += currentLine + "\n";
-
-          for (const char of currentLine) {
-            if (char === "{") {
-              braceCount++;
-              started = true;
-            } else if (char === "}") {
-              braceCount--;
-            }
-          }
-
-          if (started && braceCount === 0) {
-            endLine = j;
-            break;
+        const interfaceName =
+          interfaceMatch[1] || interfaceMatch[2] || interfaceMatch[3];
+        if (interfaceName) {
+          const result = this.extractTypeDefinition(
+            lines,
+            i,
+            "interface",
+            interfaceName
+          );
+          if (result) {
+            interfaces.push(result);
+            i = result.endLine; // Skip to end
           }
         }
-
-        const properties = this.extractProperties(interfaceContent);
-
-        interfaces.push({
-          name: interfaceName,
-          content: interfaceContent.trim(),
-          properties,
-          startLine,
-          endLine,
-        });
-
-        i = endLine; // Skip to end of interface
+      } else if (typeMatch) {
+        const typeName = typeMatch[1] || typeMatch[2] || typeMatch[3];
+        if (typeName) {
+          const result = this.extractTypeDefinition(lines, i, "type", typeName);
+          if (result) {
+            interfaces.push(result);
+            i = result.endLine; // Skip to end
+          }
+        }
       }
     }
 
     return interfaces;
+  }
+
+  private extractTypeDefinition(
+    lines: string[],
+    startIndex: number,
+    type: "interface" | "type",
+    name: string
+  ): TypeDefinition | null {
+    const startLine = startIndex;
+    let endLine = startIndex;
+    let content = "";
+
+    if (type === "interface") {
+      // Handle interface with braces
+      let braceCount = 0;
+      let started = false;
+
+      for (let j = startIndex; j < lines.length; j++) {
+        const currentLine = lines[j];
+        content += currentLine + "\n";
+
+        for (const char of currentLine) {
+          if (char === "{") {
+            braceCount++;
+            started = true;
+          } else if (char === "}") {
+            braceCount--;
+          }
+        }
+
+        if (started && braceCount === 0) {
+          endLine = j;
+          break;
+        }
+      }
+    } else {
+      // Handle type declarations (single line or multi-line)
+      content = lines[startIndex] + "\n";
+      endLine = startIndex;
+
+      // Continue reading lines for multi-line types
+      while (endLine < lines.length - 1) {
+        const currentLineContent = lines[endLine];
+        const trimmed = currentLineContent.trim();
+        const nextLine = lines[endLine + 1]?.trim() || "";
+
+        // Stop if current line ends with semicolon and next line doesn't start with |
+        if (trimmed.endsWith(";") && !nextLine.startsWith("|")) {
+          break;
+        }
+
+        // Continue if line ends with |, &, or next line starts with |
+        if (
+          trimmed.endsWith("|") ||
+          trimmed.endsWith("&") ||
+          nextLine.startsWith("|") ||
+          (trimmed.includes("=") && !trimmed.includes(";"))
+        ) {
+          endLine++;
+          content += lines[endLine] + "\n";
+        } else {
+          break;
+        }
+      }
+    }
+
+    const properties = this.extractProperties(content);
+
+    return {
+      name,
+      content: content.trim(),
+      properties,
+      startLine,
+      endLine,
+      type,
+    };
   }
 
   private extractProperties(interfaceContent: string): Set<string> {
@@ -397,8 +548,180 @@ class TypesCleanupManager {
     return properties;
   }
 
+  // File management methods
+  private async cleanupSourceFile(
+    document: vscode.TextDocument,
+    extractedInterfaces: TypeDefinition[]
+  ): Promise<void> {
+    const content = document.getText();
+    const lines = content.split("\n");
+
+    // Remove the extracted interfaces from the content
+    let cleanedLines = [...lines];
+    let linesRemoved = 0;
+
+    // Sort interfaces by line number (descending) to avoid index shifting issues
+    const sortedInterfaces = [...extractedInterfaces].sort(
+      (a, b) => b.startLine - a.startLine
+    );
+
+    for (const iface of sortedInterfaces) {
+      const startLine = iface.startLine;
+      const endLine = iface.endLine;
+      const linesToRemove = endLine - startLine + 1;
+
+      // Remove the interface lines
+      cleanedLines.splice(startLine, linesToRemove);
+      linesRemoved += linesToRemove;
+      console.log(
+        `Types Cleanup: Removed ${iface.name} from lines ${startLine} to ${endLine} (${linesToRemove} lines)`
+      );
+    }
+
+    // Update stats
+    this.lastActivity = `Removed ${linesRemoved} lines from ${path.basename(
+      document.fileName
+    )}`;
+
+    // Add or update the import statement
+    const typesImportPath = this.getTypesImportPath(document.fileName);
+    const interfaceNames = extractedInterfaces.map((i) => i.name);
+    const updatedContent = this.addOrUpdateImport(
+      cleanedLines.join("\n"),
+      typesImportPath,
+      interfaceNames
+    );
+
+    // Create a WorkspaceEdit to modify the document
+    const edit = new vscode.WorkspaceEdit();
+    const fullRange = new vscode.Range(
+      new vscode.Position(0, 0),
+      new vscode.Position(lines.length, 0)
+    );
+
+    edit.replace(document.uri, fullRange, updatedContent);
+
+    // Apply the edit
+    await vscode.workspace.applyEdit(edit);
+    console.log(
+      `Types Cleanup: Updated source file, removed ${linesRemoved} lines and added/updated imports`
+    );
+  }
+
+  private getTypesImportPath(sourceFilePath: string): string {
+    const sourceDir = path.dirname(sourceFilePath);
+    const typesPath = this.typesFilePath;
+    const relativePath = path.relative(sourceDir, typesPath);
+
+    // Convert to import path format
+    let importPath = relativePath.replace(/\\/g, "/"); // Convert Windows paths
+
+    // Remove .d.ts extension
+    importPath = importPath.replace(/\.d\.ts$/, "");
+
+    // Add ./ if it doesn't start with ../ or /
+    if (!importPath.startsWith("../") && !importPath.startsWith("/")) {
+      importPath = "./" + importPath;
+    }
+
+    return importPath;
+  }
+
+  private addOrUpdateImport(
+    content: string,
+    importPath: string,
+    newTypeNames: string[]
+  ): string {
+    const lines = content.split("\n");
+
+    // Find existing import from the types file
+    let existingImportIndex = -1;
+    let existingImportLine = "";
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (
+        line.includes(`from "${importPath}"`) ||
+        line.includes(`from '${importPath}'`)
+      ) {
+        existingImportIndex = i;
+        existingImportLine = line;
+        break;
+      }
+    }
+
+    if (existingImportIndex !== -1) {
+      // Update existing import
+      const updatedImport = this.updateExistingImport(
+        existingImportLine,
+        newTypeNames
+      );
+      lines[existingImportIndex] = updatedImport;
+      console.log(`Types Cleanup: Updated existing import: ${updatedImport}`);
+    } else {
+      // Add new import at the top (after other imports)
+      const newImport = `import { ${newTypeNames.join(
+        ", "
+      )} } from "${importPath}";`;
+      const insertIndex = this.findImportInsertIndex(lines);
+      lines.splice(insertIndex, 0, newImport);
+      console.log(`Types Cleanup: Added new import: ${newImport}`);
+    }
+
+    return lines.join("\n");
+  }
+
+  private updateExistingImport(
+    importLine: string,
+    newTypeNames: string[]
+  ): string {
+    // Extract existing imports
+    const importMatch = importLine.match(
+      /import\s*\{\s*([^}]+)\s*\}\s*from\s*["']([^"']+)["']/
+    );
+    if (!importMatch) {
+      return importLine; // Return original if we can't parse it
+    }
+
+    const existingImports = importMatch[1]
+      .split(",")
+      .map((name) => name.trim())
+      .filter((name) => name.length > 0);
+
+    const importPath = importMatch[2];
+
+    // Combine existing and new imports, remove duplicates
+    const allImports = [...new Set([...existingImports, ...newTypeNames])];
+    allImports.sort(); // Sort alphabetically
+
+    return `import { ${allImports.join(", ")} } from "${importPath}";`;
+  }
+
+  private findImportInsertIndex(lines: string[]): number {
+    let lastImportIndex = -1;
+
+    // Find the last import statement
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (line.startsWith("import ") && line.includes(" from ")) {
+        lastImportIndex = i;
+      } else if (
+        line &&
+        !line.startsWith("//") &&
+        !line.startsWith("/*") &&
+        !line.startsWith("*")
+      ) {
+        // Stop at first non-import, non-comment line
+        break;
+      }
+    }
+
+    // Insert after the last import, or at the beginning if no imports found
+    return lastImportIndex === -1 ? 0 : lastImportIndex + 1;
+  }
+
   private async addInterfacesToTypesFile(
-    newInterfaces: ParsedInterface[]
+    newInterfaces: TypeDefinition[]
   ): Promise<void> {
     let typesContent = "";
 
@@ -423,10 +746,10 @@ class TypesCleanupManager {
   }
 
   private mergeInterfaces(
-    existing: ParsedInterface[],
-    newInterfaces: ParsedInterface[]
-  ): ParsedInterface[] {
-    const interfaceMap = new Map<string, ParsedInterface>();
+    existing: TypeDefinition[],
+    newInterfaces: TypeDefinition[]
+  ): TypeDefinition[] {
+    const interfaceMap = new Map<string, TypeDefinition>();
 
     // Add existing interfaces
     for (const iface of existing) {
@@ -447,7 +770,8 @@ class TypesCleanupManager {
           newIface.name,
           mergedProperties,
           existingIface.content,
-          newIface.content
+          newIface.content,
+          newIface.type || "interface"
         );
 
         interfaceMap.set(newIface.name, {
@@ -472,9 +796,15 @@ class TypesCleanupManager {
     name: string,
     properties: Set<string>,
     existingContent: string,
-    newContent: string
+    newContent: string,
+    type: "interface" | "type" = "interface"
   ): string {
-    // Extract all unique property lines from both interfaces
+    if (type === "type") {
+      // For types, prefer the newer definition
+      return newContent;
+    }
+
+    // For interfaces, merge properties
     const allPropertyLines = new Set<string>();
 
     [existingContent, newContent].forEach((content) => {
@@ -494,19 +824,30 @@ class TypesCleanupManager {
 }`;
   }
 
-  private generateTypesFileContent(interfaces: ParsedInterface[]): string {
+  private generateTypesFileContent(interfaces: TypeDefinition[]): string {
     const header = `// Auto-generated types file managed by Types Cleanup 🧹
 // This file is automatically updated when you save TypeScript files
 
 `;
 
-    const interfaceContents = interfaces
+    // Separate types and interfaces, sort each group
+    const types = interfaces
+      .filter((i) => i.type === "type")
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const interfacesList = interfaces
+      .filter((i) => i.type !== "type")
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    // Put types first, then interfaces
+    const sortedInterfaces = [...types, ...interfacesList];
+    const interfaceContents = sortedInterfaces
       .map((iface) => iface.content)
       .join("\n\n");
 
     return header + interfaceContents + "\n";
   }
 
+  // Cleanup methods
   private scheduleCleanup(): void {
     if (this.cleanupTimer) {
       clearTimeout(this.cleanupTimer);
@@ -532,6 +873,10 @@ class TypesCleanupManager {
         fs.writeFileSync(this.typesFilePath, newContent);
 
         const removedCount = interfaces.length - usedInterfaces.length;
+        this.typesRemoved += removedCount;
+        this.lastActivity = `Auto-cleanup removed ${removedCount} unused interface(s)`;
+        this.updateStatusBar();
+
         vscode.window.showInformationMessage(
           `Cleaned up ${removedCount} unused interface(s)`
         );
@@ -542,9 +887,9 @@ class TypesCleanupManager {
   }
 
   private async findUsedInterfaces(
-    interfaces: ParsedInterface[]
-  ): Promise<ParsedInterface[]> {
-    const usedInterfaces: ParsedInterface[] = [];
+    interfaces: TypeDefinition[]
+  ): Promise<TypeDefinition[]> {
+    const usedInterfaces: TypeDefinition[] = [];
 
     try {
       // Get all TypeScript files in the workspace
@@ -612,10 +957,16 @@ class TypesCleanupManager {
         fs.writeFileSync(this.typesFilePath, newContent);
 
         const removedCount = interfaces.length - usedInterfaces.length;
+        this.typesRemoved += removedCount;
+        this.lastActivity = `Manual cleanup removed ${removedCount} unused interface(s)`;
+        this.updateStatusBar();
+
         vscode.window.showInformationMessage(
           `Manual cleanup completed - removed ${removedCount} unused interface(s)`
         );
       } else {
+        this.lastActivity = "Manual cleanup found no unused interfaces";
+        this.updateStatusBar();
         vscode.window.showInformationMessage(
           "Manual cleanup completed - no unused interfaces found"
         );
@@ -668,11 +1019,27 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
+  const testCommand = vscode.commands.registerCommand(
+    "types-cleanup.test-extraction",
+    () => {
+      manager.testExtraction();
+    }
+  );
+
+  const resetStatsCommand = vscode.commands.registerCommand(
+    "types-cleanup.reset-stats",
+    () => {
+      manager.resetStats();
+    }
+  );
+
   context.subscriptions.push(
     onSaveDisposable,
     toggleCommand,
     cleanupCommand,
     menuCommand,
+    testCommand,
+    resetStatsCommand,
     manager
   );
 }

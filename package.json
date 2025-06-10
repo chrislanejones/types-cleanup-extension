@@ -31,6 +31,16 @@
         "command": "types-cleanup.show-menu",
         "title": "Show Types Cleanup Menu",
         "category": "Types Cleanup"
+      },
+      {
+        "command": "types-cleanup.test-extraction",
+        "title": "Test Type Extraction",
+        "category": "Types Cleanup"
+      },
+      {
+        "command": "types-cleanup.reset-stats",
+        "title": "Reset Statistics",
+        "category": "Types Cleanup"
       }
     ],
     "configuration": {
