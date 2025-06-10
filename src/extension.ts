@@ -54,6 +54,11 @@ class TypesCleanupManager {
     return config.get("cleanupDelay", 2000);
   }
 
+  private isAutoCleanupEnabled(): boolean {
+    const config = vscode.workspace.getConfiguration("typesCleanup");
+    return config.get("enableAutoCleanup", true);
+  }
+
   private updateStatusBar(): void {
     if (this.isEnabled && this.typesFileExists()) {
       this.statusBarItem.text = "$(symbol-interface) Types Cleanup 🧹";
@@ -114,8 +119,10 @@ class TypesCleanupManager {
         await this.addInterfacesToTypesFile(interfaces);
       }
 
-      // Schedule cleanup with delay
-      this.scheduleCleanup();
+      // Schedule cleanup with delay (only if auto-cleanup is enabled)
+      if (this.isAutoCleanupEnabled()) {
+        this.scheduleCleanup();
+      }
     } catch (error) {
       console.error("Types Cleanup error:", error);
     }
@@ -313,7 +320,7 @@ class TypesCleanupManager {
   }
 
   private async cleanupUnusedInterfaces(): Promise<void> {
-    if (!this.typesFileExists()) {
+    if (!this.typesFileExists() || !this.isAutoCleanupEnabled()) {
       return;
     }
 
@@ -341,42 +348,51 @@ class TypesCleanupManager {
   ): Promise<ParsedInterface[]> {
     const usedInterfaces: ParsedInterface[] = [];
 
-    // Get all TypeScript files in the workspace
-    const files = await vscode.workspace.findFiles(
-      "**/*.{ts,tsx}",
-      "**/node_modules/**"
-    );
+    try {
+      // Get all TypeScript files in the workspace
+      const files = await vscode.workspace.findFiles(
+        "**/*.{ts,tsx}",
+        "**/node_modules/**"
+      );
 
-    for (const iface of interfaces) {
-      let isUsed = false;
+      for (const iface of interfaces) {
+        let isUsed = false;
 
-      for (const file of files) {
-        // Skip the Types.d.ts file itself
-        if (file.fsPath.endsWith(this.getTypesFileName())) {
-          continue;
-        }
-
-        try {
-          const content = fs.readFileSync(file.fsPath, "utf8");
-
-          // Check if interface is used (simple regex check)
-          const usageRegex = new RegExp(`\\b${iface.name}\\b`, "g");
-          if (usageRegex.test(content)) {
-            isUsed = true;
-            break;
+        for (const file of files) {
+          // Skip the Types.d.ts file itself
+          if (file.fsPath.endsWith(this.getTypesFileName())) {
+            continue;
           }
-        } catch (error) {
-          // Skip files that can't be read
-          continue;
+
+          try {
+            const content = fs.readFileSync(file.fsPath, "utf8");
+
+            // Check if interface is used (simple regex check)
+            const usageRegex = new RegExp(`\\b${iface.name}\\b`, "g");
+            if (usageRegex.test(content)) {
+              isUsed = true;
+              break;
+            }
+          } catch (error) {
+            // Skip files that can't be read
+            continue;
+          }
+        }
+
+        if (isUsed) {
+          usedInterfaces.push(iface);
         }
       }
 
-      if (isUsed) {
-        usedInterfaces.push(iface);
-      }
+      return usedInterfaces;
+    } catch (error) {
+      console.error("Error finding used interfaces:", error);
+      // Fallback: return all interfaces if search fails
+      vscode.window.showWarningMessage(
+        "Could not scan for unused interfaces. All interfaces will be preserved."
+      );
+      return interfaces;
     }
-
-    return usedInterfaces;
   }
 
   public async manualCleanup(): Promise<void> {
@@ -387,8 +403,31 @@ class TypesCleanupManager {
       return;
     }
 
-    await this.cleanupUnusedInterfaces();
-    vscode.window.showInformationMessage("Manual cleanup completed");
+    // Manual cleanup ignores the enableAutoCleanup setting
+    try {
+      const typesContent = fs.readFileSync(this.typesFilePath, "utf8");
+      const interfaces = this.extractInterfaces(typesContent);
+      const usedInterfaces = await this.findUsedInterfaces(interfaces);
+
+      if (usedInterfaces.length !== interfaces.length) {
+        const newContent = this.generateTypesFileContent(usedInterfaces);
+        fs.writeFileSync(this.typesFilePath, newContent);
+
+        const removedCount = interfaces.length - usedInterfaces.length;
+        vscode.window.showInformationMessage(
+          `Manual cleanup completed - removed ${removedCount} unused interface(s)`
+        );
+      } else {
+        vscode.window.showInformationMessage(
+          "Manual cleanup completed - no unused interfaces found"
+        );
+      }
+    } catch (error) {
+      console.error("Manual cleanup error:", error);
+      vscode.window.showErrorMessage(
+        "Manual cleanup failed. Check the output panel for details."
+      );
+    }
   }
 
   public dispose(): void {

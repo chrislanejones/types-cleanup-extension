@@ -104,11 +104,12 @@ Click the status bar icon to toggle the extension on/off.
 
 Access these settings through `File > Preferences > Settings` (VS Code) or `Cursor > Preferences > Settings` (Cursor) and search for "Types Cleanup":
 
-| Setting                      | Default        | Description                                  |
-| ---------------------------- | -------------- | -------------------------------------------- |
-| `typesCleanup.enabled`       | `true`         | Enable/disable automatic types cleanup       |
-| `typesCleanup.typesFileName` | `"Types.d.ts"` | Name of the types file to manage             |
-| `typesCleanup.cleanupDelay`  | `2000`         | Delay (ms) before cleaning unused interfaces |
+| Setting                          | Default        | Description                                   |
+| -------------------------------- | -------------- | --------------------------------------------- |
+| `typesCleanup.enabled`           | `true`         | Enable/disable automatic types cleanup        |
+| `typesCleanup.typesFileName`     | `"Types.d.ts"` | Name of the types file to manage              |
+| `typesCleanup.cleanupDelay`      | `2000`         | Delay (ms) before cleaning unused interfaces  |
+| `typesCleanup.enableAutoCleanup` | `true`         | Enable automatic cleanup of unused interfaces |
 
 ### Example Configuration
 
@@ -116,7 +117,8 @@ Access these settings through `File > Preferences > Settings` (VS Code) or `Curs
 {
   "typesCleanup.enabled": true,
   "typesCleanup.typesFileName": "global.d.ts",
-  "typesCleanup.cleanupDelay": 5000
+  "typesCleanup.cleanupDelay": 5000,
+  "typesCleanup.enableAutoCleanup": false
 }
 ```
 
@@ -167,9 +169,11 @@ export interface User {
 
 After the configured delay, unused interfaces are removed:
 
+- Uses VS Code's built-in search API (no external dependencies)
 - Scans all TypeScript files in the workspace
 - Identifies which interfaces are actually used
 - Removes unused interfaces from `Types.d.ts`
+- Can be disabled via settings if not needed
 
 ## 📁 Example Types.d.ts Output
 
