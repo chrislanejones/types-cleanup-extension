@@ -8,6 +8,7 @@ interface ParsedInterface {
   properties: Set<string>;
   startLine: number;
   endLine: number;
+  type?: "interface" | "type";
 }
 
 class TypesCleanupManager {
@@ -16,6 +17,7 @@ class TypesCleanupManager {
   private cleanupTimer: NodeJS.Timeout | null = null;
   private workspaceRoot: string;
   private typesFilePath: string;
+  private typesMoved: number = 0;
 
   constructor(context: vscode.ExtensionContext) {
     this.workspaceRoot =
@@ -33,11 +35,22 @@ class TypesCleanupManager {
       this.updateStatusBar();
     });
 
+    // Update types file path when configuration changes
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration("typesCleanup.typesFileName")) {
+        this.typesFilePath = path.join(
+          this.workspaceRoot,
+          this.getTypesFileName()
+        );
+        this.updateStatusBar();
+      }
+    });
+
     this.statusBarItem = vscode.window.createStatusBarItem(
       vscode.StatusBarAlignment.Right,
       100
     );
-    this.statusBarItem.command = "types-cleanup.toggle";
+    this.statusBarItem.command = "types-cleanup.show-menu";
     this.updateStatusBar();
     this.statusBarItem.show();
 
@@ -60,29 +73,76 @@ class TypesCleanupManager {
   }
 
   private updateStatusBar(): void {
+    const typesFileName = path.basename(this.getTypesFileName());
+
     if (this.isEnabled && this.typesFileExists()) {
-      this.statusBarItem.text = "$(symbol-interface) Types Cleanup 🧹";
-      this.statusBarItem.tooltip = "Types Cleanup is active - Click to toggle";
+      this.statusBarItem.text = `$(symbol-interface) Types Cleanup 🧹 (${this.typesMoved})`;
+      this.statusBarItem.tooltip = this.createTooltip(
+        "Active",
+        `Monitoring ${typesFileName}`
+      );
       this.statusBarItem.backgroundColor = undefined;
+      this.statusBarItem.color = undefined;
     } else if (this.isEnabled) {
-      this.statusBarItem.text =
-        "$(symbol-interface) Types Cleanup (No Types.d.ts)";
-      this.statusBarItem.tooltip = "Types Cleanup is waiting for Types.d.ts";
-      this.statusBarItem.backgroundColor = new vscode.ThemeColor(
-        "statusBarItem.warningBackground"
+      this.statusBarItem.text = `$(symbol-interface) Types Cleanup ⚠️`;
+      this.statusBarItem.tooltip = this.createTooltip(
+        "Waiting",
+        `No ${typesFileName} found`
+      );
+      this.statusBarItem.backgroundColor = undefined;
+      this.statusBarItem.color = new vscode.ThemeColor(
+        "statusBarItem.warningForeground"
       );
     } else {
-      this.statusBarItem.text = "$(symbol-interface) Types Cleanup (Disabled)";
-      this.statusBarItem.tooltip =
-        "Types Cleanup is disabled - Click to enable";
-      this.statusBarItem.backgroundColor = new vscode.ThemeColor(
-        "statusBarItem.errorBackground"
+      this.statusBarItem.text = `$(symbol-interface) Types Cleanup ❌`;
+      this.statusBarItem.tooltip = this.createTooltip(
+        "Disabled",
+        "Extension is disabled"
       );
+      this.statusBarItem.backgroundColor = undefined;
+      this.statusBarItem.color = new vscode.ThemeColor("disabledForeground");
     }
   }
 
+  private createTooltip(
+    status: string,
+    description: string
+  ): vscode.MarkdownString {
+    const tooltip = new vscode.MarkdownString();
+    tooltip.isTrusted = true;
+    tooltip.supportHtml = true;
+
+    const typesFileName = this.getTypesFileName();
+    const relativeTypesPath = path.relative(
+      this.workspaceRoot,
+      this.typesFilePath
+    );
+
+    tooltip.appendMarkdown(`**Types Cleanup 🧹**\n\n`);
+    tooltip.appendMarkdown(`**Status:** ${status}\n`);
+    tooltip.appendMarkdown(`**Description:** ${description}\n`);
+    tooltip.appendMarkdown(`**Types File:** \`${relativeTypesPath}\`\n`);
+    tooltip.appendMarkdown(
+      `**Lines Moved:** ${this.typesMoved} since last save\n\n`
+    );
+    tooltip.appendMarkdown(`---\n\n`);
+    tooltip.appendMarkdown(`**Options:**\n`);
+    tooltip.appendMarkdown(`• Click to open menu\n`);
+    tooltip.appendMarkdown(`• Toggle on/off\n`);
+    tooltip.appendMarkdown(`• Configure settings\n`);
+    tooltip.appendMarkdown(`• Manual cleanup\n`);
+
+    return tooltip;
+  }
+
   private typesFileExists(): boolean {
-    return fs.existsSync(this.typesFilePath);
+    const exists = fs.existsSync(this.typesFilePath);
+    console.log("Types Cleanup Debug:");
+    console.log("- Workspace root:", this.workspaceRoot);
+    console.log("- Types filename setting:", this.getTypesFileName());
+    console.log("- Full types path:", this.typesFilePath);
+    console.log("- File exists:", exists);
+    return exists;
   }
 
   public toggle(): void {
@@ -95,8 +155,112 @@ class TypesCleanupManager {
     vscode.window.showInformationMessage(message);
   }
 
+  public async showMenu(): Promise<void> {
+    const typesFileName = path.basename(this.getTypesFileName());
+    const currentStatus = this.isEnabled ? "Enabled" : "Disabled";
+
+    const options = [
+      {
+        label: `$(symbol-interface) Toggle Types Cleanup`,
+        description: `Currently: ${currentStatus}`,
+        action: "toggle",
+      },
+      {
+        label: `$(gear) Configure Types Directory`,
+        description: `Current: ${this.getTypesFileName()}`,
+        action: "configure",
+      },
+      {
+        label: `$(info) Stats`,
+        description: `${this.typesMoved} lines moved since last save`,
+        action: "stats",
+      },
+      {
+        label: `$(brush) Manual Cleanup Now`,
+        description: "Remove unused interfaces",
+        action: "cleanup",
+      },
+    ];
+
+    const selected = await vscode.window.showQuickPick(options, {
+      placeHolder: "Types Cleanup Options",
+      matchOnDescription: true,
+    });
+
+    if (selected) {
+      switch (selected.action) {
+        case "toggle":
+          this.toggle();
+          break;
+        case "configure":
+          await this.openSettings();
+          break;
+        case "stats":
+          await this.showStats();
+          break;
+        case "cleanup":
+          await this.manualCleanup();
+          break;
+      }
+    }
+  }
+
+  private async openSettings(): Promise<void> {
+    await vscode.commands.executeCommand(
+      "workbench.action.openSettings",
+      "typesCleanup"
+    );
+  }
+
+  private async showStats(): Promise<void> {
+    const typesExists = this.typesFileExists();
+    let interfaceCount = 0;
+
+    if (typesExists) {
+      try {
+        const content = fs.readFileSync(this.typesFilePath, "utf8");
+        const interfaces = this.extractInterfaces(content);
+        interfaceCount = interfaces.length;
+      } catch (error) {
+        // Ignore error
+      }
+    }
+
+    const stats = [
+      `**Types Cleanup Statistics**`,
+      ``,
+      `• **Status:** ${this.isEnabled ? "Enabled" : "Disabled"}`,
+      `• **Types File:** ${this.getTypesFileName()}`,
+      `• **File Exists:** ${typesExists ? "Yes" : "No"}`,
+      `• **Interfaces:** ${interfaceCount}`,
+      `• **Lines Moved:** ${this.typesMoved} since last save`,
+      `• **Auto Cleanup:** ${
+        this.isAutoCleanupEnabled() ? "Enabled" : "Disabled"
+      }`,
+      `• **Cleanup Delay:** ${this.getCleanupDelay()}ms`,
+    ].join("\n");
+
+    const markdown = new vscode.MarkdownString(stats);
+    markdown.isTrusted = true;
+
+    vscode.window.showInformationMessage(
+      stats.replace(/\*\*/g, "").replace(/•/g, "-")
+    );
+  }
+
   public async onFileSave(document: vscode.TextDocument): Promise<void> {
-    if (!this.isEnabled || !this.typesFileExists()) {
+    console.log("Types Cleanup: File saved:", document.fileName);
+
+    if (!this.isEnabled) {
+      console.log("Types Cleanup: Extension disabled");
+      return;
+    }
+
+    if (!this.typesFileExists()) {
+      console.log(
+        "Types Cleanup: Types file does not exist at:",
+        this.typesFilePath
+      );
       return;
     }
 
@@ -105,18 +269,50 @@ class TypesCleanupManager {
       !document.fileName.endsWith(".ts") &&
       !document.fileName.endsWith(".tsx")
     ) {
+      console.log("Types Cleanup: Not a TypeScript file, skipping");
       return;
     }
 
     // Don't process the Types.d.ts file itself
     if (document.fileName.endsWith(this.getTypesFileName())) {
+      console.log("Types Cleanup: Skipping types file itself");
       return;
     }
 
     try {
-      const interfaces = this.extractInterfaces(document.getText());
+      const content = document.getText();
+      console.log("Types Cleanup: File content length:", content.length);
+
+      const interfaces = this.extractInterfaces(content);
+      console.log(
+        "Types Cleanup: Found interfaces:",
+        interfaces.map((i) => i.name)
+      );
+
       if (interfaces.length > 0) {
+        const beforeCount = this.typesFileExists()
+          ? this.extractInterfaces(fs.readFileSync(this.typesFilePath, "utf8"))
+              .length
+          : 0;
+
         await this.addInterfacesToTypesFile(interfaces);
+        console.log("Types Cleanup: Added interfaces to types file");
+
+        const afterCount = this.typesFileExists()
+          ? this.extractInterfaces(fs.readFileSync(this.typesFilePath, "utf8"))
+              .length
+          : 0;
+
+        this.typesMoved += afterCount - beforeCount;
+        this.updateStatusBar();
+
+        vscode.window.showInformationMessage(
+          `Added ${interfaces.length} interface(s) to ${path.basename(
+            this.getTypesFileName()
+          )}`
+        );
+      } else {
+        console.log("Types Cleanup: No interfaces found in file");
       }
 
       // Schedule cleanup with delay (only if auto-cleanup is enabled)
@@ -125,6 +321,7 @@ class TypesCleanupManager {
       }
     } catch (error) {
       console.error("Types Cleanup error:", error);
+      vscode.window.showErrorMessage("Types Cleanup error: " + error);
     }
   }
 
@@ -259,6 +456,7 @@ class TypesCleanupManager {
           properties: mergedProperties,
           startLine: existingIface.startLine,
           endLine: existingIface.endLine,
+          type: newIface.type || existingIface.type || "interface",
         });
       } else {
         interfaceMap.set(newIface.name, newIface);
@@ -398,7 +596,7 @@ class TypesCleanupManager {
   public async manualCleanup(): Promise<void> {
     if (!this.typesFileExists()) {
       vscode.window.showWarningMessage(
-        "No Types.d.ts file found in workspace root"
+        `No ${this.getTypesFileName()} file found in workspace`
       );
       return;
     }
@@ -463,10 +661,18 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
+  const menuCommand = vscode.commands.registerCommand(
+    "types-cleanup.show-menu",
+    () => {
+      manager.showMenu();
+    }
+  );
+
   context.subscriptions.push(
     onSaveDisposable,
     toggleCommand,
     cleanupCommand,
+    menuCommand,
     manager
   );
 }

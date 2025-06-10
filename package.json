@@ -26,6 +26,11 @@
         "command": "types-cleanup.cleanup-now",
         "title": "Cleanup Types Now",
         "category": "Types Cleanup"
+      },
+      {
+        "command": "types-cleanup.show-menu",
+        "title": "Show Types Cleanup Menu",
+        "category": "Types Cleanup"
       }
     ],
     "configuration": {
@@ -39,12 +44,17 @@
         "typesCleanup.typesFileName": {
           "type": "string",
           "default": "Types.d.ts",
-          "description": "Name of the types file to manage"
+          "description": "Name of the types file to manage (can include relative path like 'types/Types.d.ts')"
         },
         "typesCleanup.cleanupDelay": {
           "type": "number",
           "default": 2000,
           "description": "Delay in milliseconds before cleaning up unused interfaces"
+        },
+        "typesCleanup.enableAutoCleanup": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable automatic cleanup of unused interfaces (disable if experiencing performance issues)"
         }
       }
     }
