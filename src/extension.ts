@@ -81,6 +81,11 @@ class TypesCleanupManager implements vscode.Disposable {
     return config.get("cleanupSourceFiles", true);
   }
 
+  private shouldIgnoreExternalTypes(): boolean {
+    const config = vscode.workspace.getConfiguration("typesCleanup");
+    return config.get("ignoreExternalTypes", true);
+  }
+
   // Status bar methods
   private updateStatusBar(): void {
     const typesFileName = path.basename(this.getTypesFileName());
@@ -264,6 +269,9 @@ class TypesCleanupManager implements vscode.Disposable {
       `• **Source Cleanup:** ${
         this.isSourceCleanupEnabled() ? "Enabled" : "Disabled"
       }`,
+      `• **Ignore External Types:** ${
+        this.shouldIgnoreExternalTypes() ? "Enabled" : "Disabled"
+      }`,
       `• **Cleanup Delay:** ${this.getCleanupDelay()}ms`,
     ].join("\n");
 
@@ -413,6 +421,11 @@ class TypesCleanupManager implements vscode.Disposable {
     const interfaces: TypeDefinition[] = [];
     const lines = content.split("\n");
 
+    // First, identify all imported types from external packages (if enabled)
+    const externalTypes = this.shouldIgnoreExternalTypes()
+      ? this.getExternallyImportedTypes(content)
+      : new Set<string>();
+
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim();
 
@@ -429,7 +442,7 @@ class TypesCleanupManager implements vscode.Disposable {
       if (interfaceMatch) {
         const interfaceName =
           interfaceMatch[1] || interfaceMatch[2] || interfaceMatch[3];
-        if (interfaceName) {
+        if (interfaceName && !externalTypes.has(interfaceName)) {
           const result = this.extractTypeDefinition(
             lines,
             i,
@@ -440,20 +453,101 @@ class TypesCleanupManager implements vscode.Disposable {
             interfaces.push(result);
             i = result.endLine; // Skip to end
           }
+        } else if (externalTypes.has(interfaceName)) {
+          console.log(
+            `Types Cleanup: Skipping external type/interface: ${interfaceName}`
+          );
         }
       } else if (typeMatch) {
         const typeName = typeMatch[1] || typeMatch[2] || typeMatch[3];
-        if (typeName) {
+        if (typeName && !externalTypes.has(typeName)) {
           const result = this.extractTypeDefinition(lines, i, "type", typeName);
           if (result) {
             interfaces.push(result);
             i = result.endLine; // Skip to end
           }
+        } else if (externalTypes.has(typeName)) {
+          console.log(`Types Cleanup: Skipping external type: ${typeName}`);
         }
       }
     }
 
     return interfaces;
+  }
+
+  private getExternallyImportedTypes(content: string): Set<string> {
+    const externalTypes = new Set<string>();
+    const lines = content.split("\n");
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+
+      // Match import statements from external packages (not relative paths)
+      const importMatch = trimmed.match(
+        /import\s+.*?\s+from\s+["']([^"']+)["']/
+      );
+      if (importMatch) {
+        const importPath = importMatch[1];
+
+        // Skip if it's a relative import (starts with . or /)
+        if (importPath.startsWith(".") || importPath.startsWith("/")) {
+          continue;
+        }
+
+        // This is an external package import
+        // Extract type imports from this line
+        const typeImports = this.extractTypeImportsFromLine(trimmed);
+        typeImports.forEach((typeName) => {
+          externalTypes.add(typeName);
+          console.log(
+            `Types Cleanup: Found external type import: ${typeName} from ${importPath}`
+          );
+        });
+      }
+    }
+
+    return externalTypes;
+  }
+
+  private extractTypeImportsFromLine(importLine: string): string[] {
+    const typeNames: string[] = [];
+
+    // Handle "type Crop as CropType" patterns
+    const typeAsMatches = importLine.matchAll(/type\s+(\w+)\s+as\s+(\w+)/g);
+    for (const match of typeAsMatches) {
+      typeNames.push(match[2]); // Add the alias name (CropType)
+    }
+
+    // Handle "type TypeName" patterns
+    const typeMatches = importLine.matchAll(/type\s+(\w+)(?!\s+as)/g);
+    for (const match of typeMatches) {
+      typeNames.push(match[1]);
+    }
+
+    // Handle default imports that might be types (like ReactCrop)
+    const defaultMatch = importLine.match(/import\s+(\w+)/);
+    if (defaultMatch && !importLine.includes("{")) {
+      // This is a default import, could be a type
+      typeNames.push(defaultMatch[1]);
+    }
+
+    // Handle regular imports that might include types
+    const namedImportsMatch = importLine.match(/import\s*\{([^}]+)\}/);
+    if (namedImportsMatch) {
+      const imports = namedImportsMatch[1].split(",");
+      for (const imp of imports) {
+        const cleanImp = imp.trim();
+        // Skip type imports (already handled above)
+        if (!cleanImp.startsWith("type ")) {
+          const nameMatch = cleanImp.match(/(\w+)(?:\s+as\s+\w+)?/);
+          if (nameMatch) {
+            typeNames.push(nameMatch[1]);
+          }
+        }
+      }
+    }
+
+    return typeNames;
   }
 
   private extractTypeDefinition(

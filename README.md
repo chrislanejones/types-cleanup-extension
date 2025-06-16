@@ -7,7 +7,7 @@
 
 **The ultimate TypeScript type organization tool for modern development workflows!**
 
-Automatically extract, organize, and manage TypeScript interfaces and type definitions from your codebase. Perfect for AI-assisted development in VS Code and Cursor IDE.
+Automatically extract, organize, and manage TypeScript interfaces and type definitions from your codebase. Perfect for AI-assisted development in VS Code and Cursor IDE. **Now with smart external package detection!**
 
 ## ✨ Key Features
 
@@ -21,6 +21,8 @@ Automatically extract, organize, and manage TypeScript interfaces and type defin
 - 🤖 **AI-Optimized** - Perfect for AI-generated code organization
 - 🔧 **Source Cleanup** - Removes interfaces from files and adds smart imports
 - 📈 **Enhanced Stats** - Track additions, removals, and extractions
+- 🔒 **External Package Detection** - Skips types from npm packages automatically
+- 📍 **Smart Import Placement** - Respects directives like "use client"
 
 ## 🚀 Quick Start
 
@@ -53,23 +55,64 @@ npm run compile
 Create a TypeScript file with types and interfaces:
 
 ```typescript
+"use client";
+
+import ReactCrop, {
+  type Crop as CropType,
+  type PixelCrop,
+} from "react-image-crop";
+import { Button } from "@/components/ui/button";
+
 export type EditorState = "crop" | "blur" | "paint";
-export type NavigationDirection = "next" | "prev";
 
 interface UserProfile {
   id: string;
   name: string;
-  preferences: EditorState[];
+  cropSettings: CropType; // External type - left alone
 }
 ```
 
 Save the file and watch the magic happen:
 
-- ✅ Interface gets **extracted** from your file
-- ✅ Interface gets **removed** from the source
-- ✅ **Import is added**: `import { UserProfile } from "@/types/types";`
-- ✅ Interface appears in your `types/Types.d.ts` file
-- ✅ Status bar updates: `🧹 (+1/-0)`
+- ✅ `EditorState` and `UserProfile` get **extracted** and **removed**
+- ✅ **Import added** after `"use client"`: `import { EditorState, UserProfile } from "@/types/types";`
+- ✅ **External types** from `react-image-crop` are **left untouched**
+- ✅ Status bar updates: `🧹 (+2/-0)`
+
+## 🔒 Smart External Package Detection
+
+### What Gets Skipped (External Packages):
+
+```typescript
+// ✅ These are automatically detected and left alone:
+import React from "react";
+import { useState, useEffect } from "react";
+import ReactCrop, {
+  type Crop as CropType,
+  type PixelCrop,
+} from "react-image-crop";
+import { Button } from "@/components/ui/button"; // UI library
+import * as THREE from "three";
+import { NextRequest } from "next/server";
+```
+
+### What Gets Processed (Local Types):
+
+```typescript
+// ✅ These get extracted to your types file:
+export type EditorState = "crop" | "blur" | "paint";
+type LocalStatus = "loading" | "ready";
+
+interface UserProfile {
+  id: string;
+  name: string;
+}
+
+interface ComponentProps {
+  title: string;
+  onEdit: () => void;
+}
+```
 
 ## 📊 Interactive Status Bar
 
@@ -91,112 +134,144 @@ Click the status bar icon to access:
 - **🧹 Manual Cleanup** - Remove unused types immediately
 - **🔄 Reset Statistics** - Clear all counters
 
-## 🎯 What Gets Extracted & How
+## 🎯 Before & After Examples
 
-### Before (Your Source File):
+### Example 1: React Component with External Types
+
+**📁 Before (components/ImageEditor.tsx):**
 
 ```typescript
-// components/pagination.tsx
+"use client";
+
+import React from "react";
+import ReactCrop, {
+  type Crop as CropType,
+  type PixelCrop,
+} from "react-image-crop";
 import { Button } from "@/components/ui/button";
 
-interface PaginationProps {
-  currentPage: number;
-  totalPages: number;
-  onNext: () => void;
-  onPrevious: () => void;
+interface ImageEditorProps {
+  imageUrl: string;
+  onCropChange: (crop: CropType) => void;
+  onSave: () => void;
 }
 
-export function Pagination({
-  currentPage,
-  totalPages,
-  onNext,
-  onPrevious,
-}: PaginationProps) {
+export function ImageEditor({
+  imageUrl,
+  onCropChange,
+  onSave,
+}: ImageEditorProps) {
   return (
     <div>
-      <Button onClick={onPrevious}>Previous</Button>
-      <span>
-        {currentPage} / {totalPages}
-      </span>
-      <Button onClick={onNext}>Next</Button>
+      <ReactCrop>
+        <img src={imageUrl} />
+      </ReactCrop>
+      <Button onClick={onSave}>Save</Button>
     </div>
   );
 }
 ```
 
-### After Saving (Automatic Transformation):
+**📁 After Saving (Automatic Transformation):**
 
-**📁 Your Source File (components/pagination.tsx):**
+**components/ImageEditor.tsx:**
 
 ```typescript
-import { Button } from "@/components/ui/button";
-import { PaginationProps } from "@/types/types"; // ← Added automatically
+"use client";
 
-export function Pagination({
-  currentPage,
-  totalPages,
-  onNext,
-  onPrevious,
-}: PaginationProps) {
+import React from "react";
+import ReactCrop, {
+  type Crop as CropType, // ← External type, left alone
+  type PixelCrop, // ← External type, left alone
+} from "react-image-crop";
+import { Button } from "@/components/ui/button";
+import { ImageEditorProps } from "@/types/types"; // ← Added automatically
+
+export function ImageEditor({
+  imageUrl,
+  onCropChange,
+  onSave,
+}: ImageEditorProps) {
   return (
     <div>
-      <Button onClick={onPrevious}>Previous</Button>
-      <span>
-        {currentPage} / {totalPages}
-      </span>
-      <Button onClick={onNext}>Next</Button>
+      <ReactCrop>
+        <img src={imageUrl} />
+      </ReactCrop>
+      <Button onClick={onSave}>Save</Button>
     </div>
   );
 }
 ```
 
-**📁 Your Types File (types/Types.d.ts):**
+**types/Types.d.ts:**
 
 ```typescript
 // Auto-generated types file managed by Types Cleanup 🧹
 // This file is automatically updated when you save TypeScript files
 
-export interface PaginationProps {
-  currentPage: number;
-  onNext: () => void;
-  onPrevious: () => void;
-  totalPages: number;
+export interface ImageEditorProps {
+  imageUrl: string;
+  onCropChange: (crop: CropType) => void; // ← References external type
+  onSave: () => void;
 }
 ```
 
-### Type Definitions Also Supported:
+### Example 2: Smart Import Merging
+
+**📁 Before:**
 
 ```typescript
-// ✅ All of these get captured and organized:
-export type Status = "active" | "inactive";
-type LocalType = string | number;
-export type ComplexType = {
-  id: string;
-  data: Record<string, any>;
-};
+import { NavigationDirection } from "@/types/types";
+
+interface SimplePaginationProps {
+  currentPage: number;
+  totalPages: number;
+  onNavigate: (direction: NavigationDirection) => void;
+}
 ```
 
-### Smart Import Management:
-
-If you already have imports from your types file:
+**📁 After:**
 
 ```typescript
-// Before
-import { EditorState } from "@/types/types";
+import { NavigationDirection, SimplePaginationProps } from "@/types/types"; // ← Merged automatically
+```
 
-// After saving file with new interface
-import { EditorState, PaginationProps } from "@/types/types"; // ← Merged automatically
+### Example 3: Respecting Directives
+
+**📁 Before:**
+
+```typescript
+"use client";
+"use strict";
+
+import React from "react";
+
+interface MyProps {
+  title: string;
+}
+```
+
+**📁 After:**
+
+```typescript
+"use client"; // ← Directives preserved
+"use strict";
+
+import React from "react";
+import { MyProps } from "@/types/types"; // ← Import placed correctly
 ```
 
 ## ⚙️ Complete Configuration Guide
 
-| Setting                           | Default        | Description                                         |
-| --------------------------------- | -------------- | --------------------------------------------------- |
-| `typesCleanup.enabled`            | `true`         | Master enable/disable switch                        |
-| `typesCleanup.typesFileName`      | `"Types.d.ts"` | Path to types file (supports subdirectories)        |
-| `typesCleanup.cleanupDelay`       | `2000`         | Delay before cleaning unused types (ms)             |
-| `typesCleanup.enableAutoCleanup`  | `true`         | Automatically remove unused definitions             |
-| `typesCleanup.cleanupSourceFiles` | `true`         | Remove interfaces from source files and add imports |
+| Setting                            | Default        | Description                                         |
+| ---------------------------------- | -------------- | --------------------------------------------------- |
+| `typesCleanup.enabled`             | `true`         | Master enable/disable switch                        |
+| `typesCleanup.typesFileName`       | `"Types.d.ts"` | Path to types file (supports subdirectories)        |
+| `typesCleanup.cleanupDelay`        | `2000`         | Delay before cleaning unused types (ms)             |
+| `typesCleanup.enableAutoCleanup`   | `true`         | Automatically remove unused definitions             |
+| `typesCleanup.cleanupSourceFiles`  | `true`         | Remove interfaces from source files and add imports |
+| `typesCleanup.ignoreExternalTypes` | `true`         | Skip types from external packages (recommended)     |
+| `typesCleanup.preserveExisting`    | `true`         | Preserve existing types when adding new ones        |
 
 ### Configuration Examples
 
@@ -208,20 +283,13 @@ import { EditorState, PaginationProps } from "@/types/types"; // ← Merged auto
 }
 ```
 
-**For `/src/types` folder:**
-
-```json
-{
-  "typesCleanup.typesFileName": "src/types/global.d.ts"
-}
-```
-
 **Conservative mode (no source cleanup):**
 
 ```json
 {
   "typesCleanup.cleanupSourceFiles": false,
-  "typesCleanup.enableAutoCleanup": false
+  "typesCleanup.enableAutoCleanup": false,
+  "typesCleanup.ignoreExternalTypes": true
 }
 ```
 
@@ -232,7 +300,16 @@ import { EditorState, PaginationProps } from "@/types/types"; // ← Merged auto
   "typesCleanup.enabled": true,
   "typesCleanup.cleanupDelay": 1000,
   "typesCleanup.enableAutoCleanup": true,
-  "typesCleanup.cleanupSourceFiles": true
+  "typesCleanup.cleanupSourceFiles": true,
+  "typesCleanup.ignoreExternalTypes": true
+}
+```
+
+**Include external types (advanced):**
+
+```json
+{
+  "typesCleanup.ignoreExternalTypes": false
 }
 ```
 
@@ -247,48 +324,40 @@ import { EditorState, PaginationProps } from "@/types/types"; // ← Merged auto
 
 ## 🔄 How the Smart Workflow Works
 
-### 1. **Detection Phase**
+### 1. **External Type Detection**
 
-- Monitors saves of `.ts` and `.tsx` files
-- Scans for `interface` and `type` declarations
-- Extracts complete definitions including multi-line types
+- Scans all imports from non-relative paths (npm packages)
+- Detects `type` imports, aliases, and default imports
+- Builds exclusion list of external types
+- Logs what's being skipped for debugging
 
-### 2. **Extraction Phase**
+### 2. **Smart Extraction**
 
-```typescript
-// Finds and extracts this entire block:
-interface ComplexInterface {
-  id: string;
-  metadata: {
-    created: Date;
-    updated?: Date;
-  };
-  permissions: Array<{
-    role: string;
-    actions: string[];
-  }>;
-}
-```
+- Only processes locally-defined interfaces and types
+- Skips anything imported from external packages
+- Handles complex interface definitions and multi-line types
+- Tracks line numbers for precise source manipulation
 
-### 3. **Organization Phase**
+### 3. **Intelligent Import Management**
 
-- Merges with existing types file
-- Sorts types alphabetically (types first, then interfaces)
-- Handles duplicate interface merging intelligently
+- Places imports after directives (`"use client"`, `"use strict"`)
+- Merges with existing imports from the same types file
+- Only imports types that are actually used in the code
+- Removes unused imports automatically
 
-### 4. **Source Cleanup Phase** (if enabled)
+### 4. **Source File Cleanup**
 
-- Removes interface definition from original file
-- Calculates optimal import path automatically
-- Updates or creates import statement
-- Preserves existing imports and adds new ones
+- Removes extracted interface definitions from source files
+- Calculates optimal import paths automatically
+- Preserves all existing external package imports
+- Updates or creates import statements intelligently
 
-### 5. **Statistics Tracking**
+### 5. **Advanced Statistics**
 
-- **Types Added**: Count of definitions added to types file
-- **Types Removed**: Count removed during cleanup
-- **Interfaces Extracted**: Count extracted from source files
-- **Lines Removed**: Actual lines removed from source files
+- **Types Added**: Definitions added to types file
+- **Types Removed**: Definitions removed during cleanup
+- **Interfaces Extracted**: Interfaces removed from source files
+- **External Types Skipped**: Types from packages that were ignored
 
 ## 📈 Enhanced Statistics & Monitoring
 
@@ -303,7 +372,8 @@ Types File: types/Types.d.ts
 Types Added: 12
 Types Removed: 3
 Interfaces Extracted: 8
-Last Activity: Extracted 1 interface(s) from pagination.tsx
+External Types Skipped: 5
+Last Activity: Extracted 1 interface(s) from ImageEditor.tsx
 
 Options:
 • Click to open menu
@@ -324,9 +394,10 @@ Access via status bar menu → "View Statistics":
 • Types Added: 12
 • Types Removed: 3
 • Interfaces Extracted: 8
-• Last Activity: Extracted 1 interface(s) from pagination.tsx
+• Last Activity: Extracted 1 interface(s) from ImageEditor.tsx
 • Auto Cleanup: Enabled
 • Source Cleanup: Enabled
+• Ignore External Types: Enabled
 • Cleanup Delay: 2000ms
 ```
 
@@ -346,133 +417,95 @@ Access via status bar menu → "View Statistics":
 - **Save TypeScript file** - Auto-extract types
 - **Hover status bar** - View detailed tooltip with stats
 
-## 🤖 Perfect for AI Development
+## 🤖 Perfect for Modern Development
 
-### Cursor IDE Integration
+### React/Next.js Projects
 
-- **Organizes AI-generated interfaces** automatically
-- **Handles rapid prototyping** with duplicate type cleanup
-- **Maintains clean types** as you experiment with AI assistance
-- **Seamless integration** with Cursor's workspace management
+- **Respects "use client"** and other directives
+- **Handles external UI libraries** (shadcn/ui, Chakra, etc.)
+- **Manages state types** while preserving React imports
+- **Works with CSS-in-JS** libraries and their types
 
-### GitHub Copilot & AI Assistants
+### AI-Assisted Development
 
-- **Cleans up AI-suggested interfaces** automatically
-- **Merges duplicate suggestions** intelligently
-- **Maintains consistency** across AI-generated code
-- **Reduces manual type management** overhead
+- **Cursor IDE Integration** - Organizes AI-generated interfaces
+- **GitHub Copilot Friendly** - Cleans up suggested interfaces
+- **Rapid Prototyping** - Handles duplicate types from iterations
+- **External API Types** - Preserves package types, organizes local ones
 
-### Real-World AI Workflow:
+### Large Codebases
 
-1. **Ask AI to generate components** with interfaces
-2. **Save the generated files** - interfaces automatically extracted
-3. **AI suggests variations** - duplicates merged intelligently
-4. **Continue iterating** - types stay organized automatically
-5. **Clean codebase** maintained without manual intervention
+- **Scalable type management** across multiple files
+- **Team collaboration** with shared configuration
+- **Performance optimized** for large projects
+- **Cleanup automation** to prevent type bloat
 
-## 🔧 Advanced Usage & Tips
+## 🔧 External Package Examples
 
-### Working with Complex Projects
+### Commonly Handled External Packages:
 
-**Multiple Types Files:**
+```typescript
+// UI Libraries
+import { Button } from "@/components/ui/button";
+import { Input } from "@chakra-ui/react";
+import { TextField } from "@mui/material";
 
-```json
-{
-  "typesCleanup.typesFileName": "src/shared/types.d.ts"
-}
+// React Ecosystem
+import { NextRequest } from "next/server";
+import { GetServerSideProps } from "next";
+import { ComponentProps } from "react";
+
+// Development Tools
+import { type Crop } from "react-image-crop";
+import { EditorState } from "draft-js";
+import { Connection } from "mongoose";
+
+// 3D/Graphics
+import * as THREE from "three";
+import { Canvas } from "@react-three/fiber";
+
+// Data Libraries
+import { z } from "zod";
+import { GraphQLSchema } from "graphql";
 ```
 
-**Team Workspace Settings:**
-Create `.vscode/settings.json` in your project:
-
-```json
-{
-  "typesCleanup.typesFileName": "types/global.d.ts",
-  "typesCleanup.enableAutoCleanup": true,
-  "typesCleanup.cleanupSourceFiles": true
-}
-```
-
-**Disable for Specific Projects:**
-
-```json
-{
-  "typesCleanup.enabled": false
-}
-```
-
-### Performance Optimization
-
-**For Large Codebases:**
-
-```json
-{
-  "typesCleanup.cleanupDelay": 10000,
-  "typesCleanup.enableAutoCleanup": false
-}
-```
-
-**For Development Speed:**
-
-```json
-{
-  "typesCleanup.cleanupDelay": 500,
-  "typesCleanup.enableAutoCleanup": true
-}
-```
+All of these imports and their associated types are automatically detected and left untouched, while your local project types get organized!
 
 ## 🔍 Troubleshooting & FAQ
 
-### ❓ **Extension Not Working?**
+### ❓ **External types being moved incorrectly?**
 
-- ✅ Check status bar for 🧹 icon (should be visible)
-- ✅ Verify types file exists at configured path
-- ✅ Ensure you're saving `.ts` or `.tsx` files
-- ✅ Check VS Code/Cursor output panel for errors
-- ✅ Verify extension is enabled (not showing ❌)
+- ✅ Check that `typesCleanup.ignoreExternalTypes` is `true` (default)
+- ✅ Verify the import is from a package, not a relative path
+- ✅ Use "Test Type Extraction" command to see what's detected
+- ✅ Check console logs for "Skipping external type" messages
 
-### ❓ **Types File Not Found?**
+### ❓ **Imports placed in wrong location?**
 
-```bash
-# Create types file if missing
-mkdir -p types
-touch types/Types.d.ts
+- ✅ The extension respects directives like `"use client"`
+- ✅ Imports are placed after existing imports and directives
+- ✅ Check if file has proper syntax (quotes, semicolons)
 
-# Or configure different path in settings
+### ❓ **Local types not being processed?**
+
+- ✅ Ensure types are defined in the same file, not imported
+- ✅ Check for proper `interface` or `type` syntax
+- ✅ Verify extension is enabled (green status bar)
+- ✅ Use "Test Type Extraction" to debug
+
+### ❓ **Import merging not working?**
+
+- ✅ Ensure existing import is from the same types file
+- ✅ Check that import syntax is standard
+- ✅ Verify types are actually used in the code
+
+### ❓ **Want to include external types?**
+
+```json
 {
-  "typesCleanup.typesFileName": "your-custom-path/types.d.ts"
+  "typesCleanup.ignoreExternalTypes": false
 }
 ```
-
-### ❓ **Interfaces Not Being Extracted?**
-
-- ✅ Verify proper TypeScript syntax
-- ✅ Check that definitions start with `interface` or `type`
-- ✅ Ensure files have `.ts` or `.tsx` extensions
-- ✅ Confirm extension is enabled (green status bar)
-- ✅ Test extraction: Command Palette → "Types Cleanup: Test Type Extraction"
-
-### ❓ **Source Cleanup Not Working?**
-
-- ✅ Check `typesCleanup.cleanupSourceFiles` is `true`
-- ✅ Verify the interface was actually extracted
-- ✅ Look for any TypeScript syntax errors in the file
-- ✅ Check console logs for detailed debug information
-
-### ❓ **Import Paths Wrong?**
-
-The extension automatically calculates relative paths. If imports are incorrect:
-
-- ✅ Verify your types file is in the expected location
-- ✅ Check workspace root is correctly detected
-- ✅ Manually adjust the generated import if needed
-
-### ❓ **Cleanup Removing Used Types?**
-
-- ✅ Wait for cleanup delay (default: 2 seconds)
-- ✅ Check if types are used in comments or strings (not detected)
-- ✅ Disable auto-cleanup: `"typesCleanup.enableAutoCleanup": false`
-- ✅ Use manual cleanup for more control
 
 ## 🛠️ Development & Contributing
 
@@ -501,111 +534,109 @@ vsce package
 
 ### Testing Checklist
 
-1. **Test type extraction** with various interface formats
-2. **Test source cleanup** and import generation
-3. **Test merge behavior** with duplicate interfaces
-4. **Test cleanup functionality** with unused types
-5. **Test configuration changes** and settings
-6. **Test in both VS Code and Cursor**
-
-### Contributing Guidelines
-
-1. Fork the repository
-2. Create feature branch: `git checkout -b feature-name`
-3. Write tests for new functionality
-4. Ensure TypeScript compilation succeeds
-5. Test with real TypeScript projects
-6. Submit pull request with clear description
+1. **Test external package detection** with various import formats
+2. **Test directive respect** with "use client", "use strict"
+3. **Test import merging** with existing types imports
+4. **Test usage detection** - only used types get imported
+5. **Test cleanup functionality** with unused types
+6. **Test configuration changes** and settings
+7. **Test in both VS Code and Cursor**
 
 ## 📊 Real-World Usage Examples
 
-### Example 1: React Component Development
+### Example 1: React Component Library
 
 ```typescript
 // Before: components/UserCard.tsx
+"use client";
+
+import { Avatar } from "@/components/ui/avatar";
+import { Card } from "@/components/ui/card";
+import { User } from "@prisma/client"; // External DB type
+
 interface UserCardProps {
-  user: User;
-  onEdit: (id: string) => void;
-  isLoading: boolean;
+  user: User; // Uses external type
+  onEdit: (userId: string) => void;
+  showActions?: boolean;
 }
 
-// After saving → Interface moved to types file, import added
-import { UserCardProps } from "@/types/types";
+// After: External User type preserved, UserCardProps extracted
 ```
 
-### Example 2: API Response Types
+### Example 2: Next.js API Route
 
 ```typescript
 // Before: api/users.ts
+import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+
+const UserSchema = z.object({
+  name: z.string(),
+  email: z.string().email(),
+});
+
+type CreateUserRequest = z.infer<typeof UserSchema>;
+
 interface ApiResponse<T> {
-  data: T;
-  status: number;
-  message?: string;
+  success: boolean;
+  data?: T;
+  error?: string;
 }
 
-type UserData = {
-  id: string;
-  name: string;
-  email: string;
-};
-
-// After saving → Both definitions organized in types file
+// After: Next.js and Zod types preserved, local types extracted
 ```
 
-### Example 3: Utility Types
+### Example 3: Complex Import Scenarios
 
 ```typescript
-// Multiple files with similar types get merged:
+// Before: Multiple external packages
+import React, { ComponentProps } from "react";
+import { type Crop as CropType, type PixelCrop } from "react-image-crop";
+import * as THREE from "three";
+import { GraphQLSchema, type GraphQLFieldConfig } from "graphql";
 
-// File A:
-interface Config {
-  apiUrl: string;
-  timeout: number;
+interface LocalEditorProps {
+  crop: CropType; // External type reference
+  schema: GraphQLSchema; // External type reference
+  scene: THREE.Scene; // External type reference
 }
 
-// File B:
-interface Config {
-  retries: number;
-  debug: boolean;
-}
-
-// Result in types file:
-export interface Config {
-  apiUrl: string;
-  debug: boolean;
-  retries: number;
-  timeout: number;
-}
+// After: All external types preserved, LocalEditorProps extracted
 ```
 
 ## 📝 Changelog
 
 ### [1.0.0] - 2025-06-10
 
-- ✨ **Initial release** with full type extraction
-- 🔄 **Smart interface merging** and deduplication
-- 🧹 **Automatic cleanup** of unused definitions
-- 📊 **Interactive status bar** with live statistics
-- ⚙️ **Comprehensive configuration** options
-- 🎯 **Support for both `interface` and `type`** definitions
-- 🎨 **Theme-aware status** indicators
-- 🤖 **Optimized for AI-assisted** development workflows
-- 🔧 **VS Code and Cursor IDE** compatibility
-- 🔧 **Source file cleanup** with smart import management
-- 📈 **Enhanced statistics** tracking additions, removals, and extractions
-- 🎮 **Interactive command menu** with quick actions
-- 🧪 **Debug tools** for testing and troubleshooting
+#### 🎉 Major Release with Smart External Detection
+
+- ✨ **Smart External Package Detection** - Automatically skips types from npm packages
+- 🔧 **Intelligent Import Placement** - Respects directives like "use client"
+- 📍 **Advanced Import Merging** - Only includes used types in imports
+- 🔒 **External Type Preservation** - Leaves package imports completely untouched
+- ⚙️ **Enhanced Configuration** - New `ignoreExternalTypes` setting
+- 📊 **Improved Statistics** - Tracks external types skipped
+- 🧪 **Better Debug Tools** - Enhanced logging and test extraction
+- 🎯 **Usage Detection** - Only imports types that are actually referenced
+- 📈 **Performance Improvements** - Optimized parsing and analysis
+
+[See complete changelog](CHANGELOG.md)
 
 ## 🎯 Roadmap
 
-### Planned Features
+### Planned for v1.1.0
 
-- **🔄 Batch processing** for existing projects
-- **📁 Multiple types files** support
-- **🎨 Custom templates** for generated files
-- **🔍 Advanced usage analysis** and reporting
-- **⚡ Performance optimizations** for large codebases
-- **🔗 Integration with popular** TypeScript tools
+- **Batch Processing** - Process existing projects in bulk
+- **Custom Templates** - User-defined type file templates
+- **Advanced Analytics** - Detailed type usage reporting
+- **Workspace Type Maps** - Visual type dependency graphs
+
+### Planned for v1.2.0
+
+- **Multiple Types Files** - Organize types across multiple files
+- **Type Categories** - Automatic categorization by purpose
+- **Git Integration** - Commit hooks and change tracking
+- **Team Features** - Shared configuration and standards
 
 ## 📄 License
 
@@ -615,9 +646,9 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 - Built with VS Code Extension API for universal compatibility
 - Inspired by the need for automated TypeScript organization in modern development
-- Thanks to the TypeScript and AI development communities for feedback and best practices
-- Special appreciation for Cursor IDE's innovative AI-first approach to development
-- Gratitude to all contributors and early adopters
+- Thanks to the TypeScript, React, and AI development communities
+- Special appreciation for Cursor IDE's innovative AI-first approach
+- Gratitude to all contributors and early adopters who provided feedback
 
 ---
 
@@ -625,412 +656,10 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 **Install Types Cleanup 🧹 and experience effortless type management!**
 
-Whether you're working with AI-generated code, managing large TypeScript projects, or just want cleaner type organization, this extension will revolutionize how you handle TypeScript interfaces and types.
+Whether you're working with React components, Next.js applications, external UI libraries, or AI-generated code, this extension will revolutionize how you handle TypeScript interfaces and types while respecting your external dependencies.
 
 ⭐ **Star this project if it saves you time!** ⭐
 
 ---
 
-_Happy coding with clean, organized types!_ 🚀ttps://img.shields.io/badge/VS%20Code-Compatible-green.svg)](https://code.visualstudio.com/)
-[![Cursor](https://img.shields.io/badge/Cursor-Compatible-blue.svg)](https://cursor.sh/)
-
-**The ultimate TypeScript type organization tool for modern development workflows!**
-
-Automatically extract, organize, and manage TypeScript interfaces and type definitions from your codebase. Perfect for AI-assisted development in VS Code and Cursor IDE.
-
-## ✨ Key Features
-
-- 🎯 **Smart Extraction** - Automatically captures both `interface` and `type` definitions
-- 🔄 **Intelligent Merging** - Combines duplicate interfaces while preserving all unique properties
-- 🗂️ **Auto-Organization** - Sorts types first, then interfaces alphabetically
-- 🧹 **Cleanup Engine** - Removes unused type definitions automatically
-- 📊 **Live Status** - Interactive status bar with real-time statistics
-- ⚙️ **Highly Configurable** - Customize paths, delays, and behavior
-- 🎨 **Theme-Aware** - Status colors match your editor theme
-- 🤖 **AI-Optimized** - Perfect for AI-generated code organization
-
-## 🚀 Quick Start
-
-### 1. Install & Setup
-
-```bash
-git clone https://github.com/yourusername/types-cleanup
-cd types-cleanup
-npm install
-npm run compile
-```
-
-### 2. Configure Your Types File
-
-```json
-{
-  "typesCleanup.typesFileName": "types/Types.d.ts"
-}
-```
-
-### 3. Launch Extension
-
-1. Open extension folder in VS Code: `code .`
-2. Press `F5` to launch Extension Development Host
-3. Open your TypeScript project
-4. Look for the 🧹 icon in status bar
-
-### 4. Test It Out
-
-Create a TypeScript file with types and interfaces:
-
-```typescript
-export type EditorState = "crop" | "blur" | "paint";
-export type NavigationDirection = "next" | "prev";
-
-interface UserProfile {
-  id: string;
-  name: string;
-  preferences: EditorState[];
-}
-```
-
-Save the file and watch your types get organized automatically! 🎉
-
-## 📊 Interactive Status Bar
-
-Click the status bar icon to access the command menu:
-
-| Status                  | Description               | Action           |
-| ----------------------- | ------------------------- | ---------------- |
-| 🧹 Types Cleanup 🧹 (5) | Active with 5 types moved | Click for menu   |
-| 🧹 Types Cleanup ⚠️     | Waiting for types file    | Configure path   |
-| 🧹 Types Cleanup ❌     | Extension disabled        | Enable extension |
-
-### Status Bar Menu Options:
-
-- **Toggle Extension** - Enable/disable on-the-fly
-- **Configure Directory** - Set custom types file path
-- **View Statistics** - See detailed stats and activity
-- **Manual Cleanup** - Remove unused types immediately
-
-## 🎯 What Gets Extracted
-
-### Type Definitions
-
-```typescript
-// ✅ All of these get captured:
-export type Status = "active" | "inactive";
-type LocalType = string | number;
-export type ComplexType = {
-  id: string;
-  data: Record<string, any>;
-};
-```
-
-### Interface Definitions
-
-```typescript
-// ✅ All of these get captured:
-export interface ApiResponse {
-  status: number;
-  data: any;
-}
-
-interface ComponentProps {
-  title: string;
-  onClick: () => void;
-}
-```
-
-## ⚙️ Configuration Options
-
-| Setting                          | Default        | Description                                  |
-| -------------------------------- | -------------- | -------------------------------------------- |
-| `typesCleanup.enabled`           | `true`         | Master enable/disable switch                 |
-| `typesCleanup.typesFileName`     | `"Types.d.ts"` | Path to types file (supports subdirectories) |
-| `typesCleanup.cleanupDelay`      | `2000`         | Delay before cleaning unused types (ms)      |
-| `typesCleanup.enableAutoCleanup` | `true`         | Automatically remove unused definitions      |
-| `typesCleanup.preserveExisting`  | `true`         | Preserve existing types when adding new ones |
-
-### Configuration Examples
-
-**For `/types` folder structure:**
-
-```json
-{
-  "typesCleanup.typesFileName": "types/Types.d.ts"
-}
-```
-
-**For large projects (conservative settings):**
-
-```json
-{
-  "typesCleanup.enableAutoCleanup": false,
-  "typesCleanup.cleanupDelay": 5000
-}
-```
-
-**For AI development (aggressive organization):**
-
-```json
-{
-  "typesCleanup.enabled": true,
-  "typesCleanup.cleanupDelay": 1000,
-  "typesCleanup.enableAutoCleanup": true
-}
-```
-
-## 🔄 How It Works
-
-### 1. **Extraction Process**
-
-- Monitors `.ts` and `.tsx` file saves
-- Parses for `interface` and `type` declarations
-- Extracts complete definitions including multi-line types
-
-### 2. **Smart Merging**
-
-```typescript
-// File A
-interface User {
-  id: string;
-  name: string;
-}
-
-// File B
-interface User {
-  email: string;
-  age: number;
-}
-
-// Result in Types.d.ts
-export interface User {
-  age: number;
-  email: string;
-  id: string;
-  name: string;
-}
-```
-
-### 3. **Type Handling**
-
-```typescript
-// Types get updated, not merged
-type Status = "loading"; // Old
-type Status = "loading" | "ready"; // New (replaces old)
-```
-
-### 4. **Auto-Organization**
-
-Generated types file structure:
-
-```typescript
-// Auto-generated types file managed by Types Cleanup 🧹
-
-// Types come first (alphabetical)
-export type EditorState = "crop" | "blur";
-export type NavigationDirection = "next" | "prev";
-
-// Then interfaces (alphabetical)
-export interface ComponentProps {
-  title: string;
-}
-
-export interface UserProfile {
-  id: string;
-  name: string;
-}
-```
-
-## 🎮 Commands & Shortcuts
-
-### Command Palette Commands:
-
-- `Types Cleanup: Toggle` - Enable/disable extension
-- `Types Cleanup: Cleanup Types Now` - Manual cleanup
-- `Types Cleanup: Show Types Cleanup Menu` - Open interactive menu
-
-### Quick Actions:
-
-- **Status bar click** - Open command menu
-- **Save TypeScript file** - Auto-extract types
-- **Hover status bar** - View detailed tooltip
-
-## 🔧 Advanced Usage
-
-### Custom Types File Locations
-
-```json
-{
-  "typesCleanup.typesFileName": "src/shared/types.d.ts"
-}
-```
-
-### Workspace-Specific Settings
-
-Create `.vscode/settings.json` in your project:
-
-```json
-{
-  "typesCleanup.typesFileName": "types/global.d.ts",
-  "typesCleanup.enableAutoCleanup": true
-}
-```
-
-### Disable for Specific Projects
-
-```json
-{
-  "typesCleanup.enabled": false
-}
-```
-
-## 🤖 Perfect for AI Development
-
-### Cursor IDE Integration
-
-- Organizes AI-generated interfaces automatically
-- Handles rapid prototyping with duplicate type cleanup
-- Maintains clean types as you iterate with AI assistance
-
-### GitHub Copilot Friendly
-
-- Cleans up Copilot-suggested interfaces
-- Merges duplicate suggestions intelligently
-- Keeps your types consistent across AI sessions
-
-## 🔍 Troubleshooting
-
-### Extension Not Working?
-
-- ✅ Check status bar for 🧹 icon
-- ✅ Verify types file exists at configured path
-- ✅ Ensure you're saving `.ts` or `.tsx` files
-- ✅ Check VS Code output panel for errors
-
-### Types File Not Found?
-
-```bash
-# Create types file if missing
-mkdir -p types
-touch types/Types.d.ts
-
-# Or configure different path
-{
-  "typesCleanup.typesFileName": "your-path/types.d.ts"
-}
-```
-
-### Types Not Being Extracted?
-
-- ✅ Verify proper TypeScript syntax
-- ✅ Check that definitions start with `interface` or `type`
-- ✅ Ensure files have `.ts` or `.tsx` extensions
-- ✅ Confirm extension is enabled (green status bar)
-
-### Cleanup Not Working?
-
-- ✅ Wait for cleanup delay (default: 2 seconds)
-- ✅ Check `typesCleanup.enableAutoCleanup` is `true`
-- ✅ Try manual cleanup via command palette
-- ✅ Verify types aren't used in comments or strings
-
-## 🛠️ Development
-
-### Build from Source
-
-```bash
-git clone https://github.com/yourusername/types-cleanup
-cd types-cleanup
-npm install
-npm run compile
-```
-
-### Watch Mode (for development)
-
-```bash
-npm run watch
-```
-
-### Package Extension
-
-```bash
-npm install -g vsce
-vsce package
-```
-
-### Testing
-
-1. Press `F5` in VS Code to launch Extension Development Host
-2. Open TypeScript project with types file
-3. Save files with interfaces/types
-4. Verify extraction and organization
-
-## 📈 Statistics & Monitoring
-
-The extension tracks:
-
-- **Types moved** since last save
-- **Total interfaces** in types file
-- **Cleanup activity** and timing
-- **File monitoring** status
-
-Access stats via status bar menu → "View Statistics"
-
-## 🎨 Customization
-
-### Status Bar Appearance
-
-The extension automatically matches your theme colors:
-
-- **Active state** - Default theme color
-- **Warning state** - Theme warning color
-- **Disabled state** - Theme disabled color
-
-### Tooltip Information
-
-Hover over status bar for:
-
-- Current status and file path
-- Types moved counter
-- Available actions
-- Configuration summary
-
-## 📝 Changelog
-
-### [1.0.0] - 2025-06-10
-
-- ✨ Initial release with full type extraction
-- 🔄 Smart interface merging and deduplication
-- 🧹 Automatic cleanup of unused definitions
-- 📊 Interactive status bar with live statistics
-- ⚙️ Comprehensive configuration options
-- 🎯 Support for both `interface` and `type` definitions
-- 🎨 Theme-aware status indicators
-- 🤖 Optimized for AI-assisted development workflows
-- 🔧 VS Code and Cursor IDE compatibility
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create feature branch: `git checkout -b feature-name`
-3. Make your changes with tests
-4. Commit: `git commit -am 'Add feature'`
-5. Push: `git push origin feature-name`
-6. Submit a pull request
-
-## 📄 License
-
-MIT License - see [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- Built with VS Code Extension API
-- Inspired by the need for automated TypeScript organization
-- Thanks to the TypeScript and AI development communities
-- Special appreciation for Cursor IDE's innovative approach
-
----
-
-**Ready to keep your TypeScript types perfectly organized?**
-
-Install Types Cleanup 🧹 and experience effortless type management in your development workflow!
-
-⭐ **Star this project if it helps you!** ⭐
+_Happy coding with clean, organized types and preserved external dependencies!_ 🚀
