@@ -434,15 +434,18 @@ class TypesCleanupManager implements vscode.Disposable {
         /^export\s+interface\s+(\w+)|^interface\s+(\w+)|^\s*interface\s+(\w+)/
       );
 
-      // Match type declarations
+      // Match type declarations (improved pattern)
       const typeMatch = line.match(
-        /^export\s+type\s+(\w+)|^type\s+(\w+)|^\s*type\s+(\w+)/
+        /^export\s+type\s+(\w+)\s*=|^type\s+(\w+)\s*=|^\s*type\s+(\w+)\s*=/
       );
 
       if (interfaceMatch) {
         const interfaceName =
           interfaceMatch[1] || interfaceMatch[2] || interfaceMatch[3];
         if (interfaceName && !externalTypes.has(interfaceName)) {
+          console.log(
+            `Types Cleanup: Found interface: ${interfaceName} at line ${i}`
+          );
           const result = this.extractTypeDefinition(
             lines,
             i,
@@ -455,12 +458,13 @@ class TypesCleanupManager implements vscode.Disposable {
           }
         } else if (externalTypes.has(interfaceName)) {
           console.log(
-            `Types Cleanup: Skipping external type/interface: ${interfaceName}`
+            `Types Cleanup: Skipping external interface: ${interfaceName}`
           );
         }
       } else if (typeMatch) {
         const typeName = typeMatch[1] || typeMatch[2] || typeMatch[3];
         if (typeName && !externalTypes.has(typeName)) {
+          console.log(`Types Cleanup: Found type: ${typeName} at line ${i}`);
           const result = this.extractTypeDefinition(lines, i, "type", typeName);
           if (result) {
             interfaces.push(result);
@@ -585,36 +589,49 @@ class TypesCleanupManager implements vscode.Disposable {
       }
     } else {
       // Handle type declarations (single line or multi-line)
-      content = lines[startIndex] + "\n";
+      content = lines[startIndex];
       endLine = startIndex;
 
       // Continue reading lines for multi-line types
       while (endLine < lines.length - 1) {
         const currentLineContent = lines[endLine];
         const trimmed = currentLineContent.trim();
-        const nextLine = lines[endLine + 1]?.trim() || "";
 
-        // Stop if current line ends with semicolon and next line doesn't start with |
-        if (trimmed.endsWith(";") && !nextLine.startsWith("|")) {
+        // Check if the current line completes the type definition
+        if (this.isTypeDefinitionComplete(trimmed)) {
           break;
         }
 
-        // Continue if line ends with |, &, or next line starts with |
+        // Continue to next line if:
+        // 1. Line ends with | or &
+        // 2. Line ends with = but no semicolon
+        // 3. Next line starts with |
+        const nextLine = lines[endLine + 1]?.trim() || "";
+
         if (
           trimmed.endsWith("|") ||
           trimmed.endsWith("&") ||
+          (trimmed.includes("=") && !trimmed.includes(";")) ||
           nextLine.startsWith("|") ||
-          (trimmed.includes("=") && !trimmed.includes(";"))
+          nextLine.startsWith("&")
         ) {
           endLine++;
-          content += lines[endLine] + "\n";
+          content += "\n" + lines[endLine];
         } else {
           break;
         }
       }
+
+      // Ensure we have the complete type definition
+      content = content.trim();
+      if (!content.endsWith(";")) {
+        content += ";";
+      }
     }
 
     const properties = this.extractProperties(content);
+
+    console.log(`Types Cleanup: Extracted ${type} "${name}":`, content);
 
     return {
       name,
@@ -624,6 +641,30 @@ class TypesCleanupManager implements vscode.Disposable {
       endLine,
       type,
     };
+  }
+
+  private isTypeDefinitionComplete(line: string): boolean {
+    // A type definition is complete if:
+    // 1. It ends with a semicolon
+    // 2. It has an = and ends with a value (not | or &)
+
+    if (line.endsWith(";")) {
+      return true;
+    }
+
+    if (line.includes("=") && !line.endsWith("|") && !line.endsWith("&")) {
+      // Check if it's a simple assignment that doesn't need continuation
+      const afterEquals = line.split("=")[1]?.trim();
+      if (
+        afterEquals &&
+        !afterEquals.endsWith("|") &&
+        !afterEquals.endsWith("&")
+      ) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   private extractProperties(interfaceContent: string): Set<string> {
@@ -938,8 +979,20 @@ class TypesCleanupManager implements vscode.Disposable {
     type: "interface" | "type" = "interface"
   ): string {
     if (type === "type") {
-      // For types, prefer the newer definition
-      return newContent;
+      // For types, prefer the newer definition and ensure proper formatting
+      let cleanContent = newContent.trim();
+
+      // Ensure export prefix for types
+      if (!cleanContent.startsWith("export ")) {
+        cleanContent = cleanContent.replace(/^type\s+/, "export type ");
+      }
+
+      // Ensure semicolon at the end
+      if (!cleanContent.endsWith(";")) {
+        cleanContent += ";";
+      }
+
+      return cleanContent;
     }
 
     // For interfaces, merge properties
