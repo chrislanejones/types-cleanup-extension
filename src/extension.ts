@@ -586,8 +586,9 @@ class TypesCleanupManager implements vscode.Disposable {
     // Add or update the import statement
     const typesImportPath = this.getTypesImportPath(document.fileName);
     const interfaceNames = extractedInterfaces.map((i) => i.name);
+    const cleanedContent = cleanedLines.join("\n");
     const updatedContent = this.addOrUpdateImport(
-      cleanedLines.join("\n"),
+      cleanedContent,
       typesImportPath,
       interfaceNames
     );
@@ -634,6 +635,19 @@ class TypesCleanupManager implements vscode.Disposable {
   ): string {
     const lines = content.split("\n");
 
+    // Filter out types that aren't actually used in the content
+    const usedTypeNames = newTypeNames.filter((typeName) => {
+      const usageRegex = new RegExp(`\\b${typeName}\\b`, "g");
+      return usageRegex.test(content);
+    });
+
+    if (usedTypeNames.length === 0) {
+      console.log(
+        "Types Cleanup: No extracted types are actually used in this file, skipping import"
+      );
+      return content;
+    }
+
     // Find existing import from the types file
     let existingImportIndex = -1;
     let existingImportLine = "";
@@ -654,13 +668,13 @@ class TypesCleanupManager implements vscode.Disposable {
       // Update existing import
       const updatedImport = this.updateExistingImport(
         existingImportLine,
-        newTypeNames
+        usedTypeNames
       );
       lines[existingImportIndex] = updatedImport;
       console.log(`Types Cleanup: Updated existing import: ${updatedImport}`);
     } else {
-      // Add new import at the top (after other imports)
-      const newImport = `import { ${newTypeNames.join(
+      // Add new import after directives and other imports
+      const newImport = `import { ${usedTypeNames.join(
         ", "
       )} } from "${importPath}";`;
       const insertIndex = this.findImportInsertIndex(lines);
@@ -698,26 +712,56 @@ class TypesCleanupManager implements vscode.Disposable {
   }
 
   private findImportInsertIndex(lines: string[]): number {
+    let insertIndex = 0;
     let lastImportIndex = -1;
+    let foundDirectives = false;
 
-    // Find the last import statement
+    // First pass: find directives and imports
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim();
+
+      // Skip empty lines and comments at the top
+      if (
+        !line ||
+        line.startsWith("//") ||
+        line.startsWith("/*") ||
+        line.startsWith("*")
+      ) {
+        continue;
+      }
+
+      // Check for React/Next.js directives
+      if (line.startsWith('"use ') || line.startsWith("'use ")) {
+        foundDirectives = true;
+        insertIndex = i + 1;
+        continue;
+      }
+
+      // Check for import statements
       if (line.startsWith("import ") && line.includes(" from ")) {
         lastImportIndex = i;
-      } else if (
-        line &&
-        !line.startsWith("//") &&
-        !line.startsWith("/*") &&
-        !line.startsWith("*")
-      ) {
-        // Stop at first non-import, non-comment line
-        break;
+        continue;
       }
+
+      // If we hit non-import, non-directive code, stop
+      break;
     }
 
-    // Insert after the last import, or at the beginning if no imports found
-    return lastImportIndex === -1 ? 0 : lastImportIndex + 1;
+    // Determine where to insert:
+    // 1. After the last import (if any exist)
+    // 2. After directives (if no imports but directives exist)
+    // 3. At the beginning (if neither exist)
+
+    if (lastImportIndex !== -1) {
+      // Insert after the last import
+      return lastImportIndex + 1;
+    } else if (foundDirectives) {
+      // Insert after directives but before other code
+      return insertIndex;
+    } else {
+      // Insert at the very beginning
+      return 0;
+    }
   }
 
   private async addInterfacesToTypesFile(
