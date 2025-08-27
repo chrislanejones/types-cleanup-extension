@@ -12,7 +12,9 @@
   ],
   "activationEvents": [
     "onLanguage:typescript",
-    "onLanguage:typescriptreact"
+    "onLanguage:typescriptreact",
+    "onCommand:typesCleanup.toggleCollapse",
+    "onCommand:typesCleanup.jumpToType"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -41,6 +43,14 @@
         "command": "types-cleanup.reset-stats",
         "title": "Reset Statistics",
         "category": "Types Cleanup"
+      },
+      {
+        "command": "typesCleanup.toggleCollapse",
+        "title": "Types Cleanup: Toggle Collapse in File"
+      },
+      {
+        "command": "typesCleanup.jumpToType",
+        "title": "Types Cleanup: Jump to Type"
       }
     ],
     "configuration": {
@@ -65,6 +75,30 @@
           "type": "boolean",
           "default": true,
           "description": "Enable automatic cleanup of unused interfaces (disable if experiencing performance issues)"
+        },
+        "typesCleanup.autoCollapse.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Auto-collapse type/interface blocks on open."
+        },
+        "typesCleanup.autoCollapse.onlyPatterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "*Props",
+            "*State"
+          ],
+          "description": "Only collapse names matching these glob-like patterns."
+        },
+        "typesCleanup.output": {
+          "type": "object",
+          "default": {
+            "default": "src/types/types.d.ts",
+            "rules": []
+          },
+          "description": "Route extracted types to different files based on file globs."
         }
       }
     }
@@ -78,5 +112,8 @@
     "@types/vscode": "^1.74.0",
     "@types/node": "16.x",
     "typescript": "^4.9.4"
+  },
+  "dependencies": {
+    "micromatch": "^4.0.7"
   }
 }

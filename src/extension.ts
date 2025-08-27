@@ -1,3 +1,8 @@
+// BEGIN TYPES-CLEANUP UPGRADE (auto-added imports)
+import { registerCollapseAutoload } from "./collapse";
+import { registerJump } from "./jump";
+import { registerUsageInvalidation } from "./usage";
+// END TYPES-CLEANUP UPGRADE
 import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
@@ -1179,6 +1184,11 @@ class TypesCleanupManager implements vscode.Disposable {
 }
 
 export function activate(context: vscode.ExtensionContext) {
+  // BEGIN TYPES-CLEANUP UPGRADE (auto wiring)
+  registerCollapseAutoload(context);
+  registerJump(context);
+  registerUsageInvalidation(context);
+  // END TYPES-CLEANUP UPGRADE
   const manager = new TypesCleanupManager(context);
 
   // Register file save handler
